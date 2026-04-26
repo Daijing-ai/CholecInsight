@@ -104,6 +104,8 @@ CholecInsight/
 - Python 3.8+
 - 可选：CUDA 环境与 PyTorch GPU 版本
 
+可参考仓库根目录的 `.env.example` 了解当前项目使用的环境变量。
+
 ### 5.2 启动前端
 
 ```bash
