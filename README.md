@@ -24,7 +24,7 @@ CholecInsight 主要聚焦腹腔镜胆囊切除术（LC, Laparoscopic Cholecyste
 
 ## 2. 当前实现状态
 
-目前仓库更接近“可演示原型”而不是“完整生产系统”，这点建议团队成员在协作时统一认知。
+目前仓库更接近“可演示原型”而不是“完整生产系统”。
 
 ### 前端当前能力
 
@@ -154,7 +154,7 @@ SURGPHASE_ROOT=D:\project\SurgPhase
 
 ### 权重文件说明
 
-由于预训练权重体积较大，不适合直接存放在 GitHub 仓库中，因此本仓库**不提交权重文件本体**。团队成员需要从项目维护者提供的百度网盘链接单独下载权重，并手动放到下面的位置：
+由于预训练权重体积较大，不适合直接存放在 GitHub 仓库中，因此本仓库**不提交权重文件本体**。团队成员需要从百度网盘链接单独下载权重，并手动放到下面的位置：
 
 ```text
 backend/pretrained_weights/
@@ -165,10 +165,10 @@ backend/pretrained_weights/
 - `cnn_checkpoint_best_acc.pth.tar`
 - `head_checkpoint_best_acc.pth.tar`
 
-建议维护者在团队内部补充以下分发信息：
+权重文件地址：
 
-- 百度网盘链接：`<待补充>`
-- 提取码：`<待补充>`
+- 百度网盘链接：`https://pan.baidu.com/s/1pnqnadYkODxdyco6zZZcfw?pwd=auhm`
+- 提取码：`auhm`
 
 如果权重不存在，模型相关能力将无法正常运行。
 
@@ -192,8 +192,6 @@ VITE_API_BASE_URL=http://127.0.0.1:8001
 6. 前端轮询任务状态并更新项目结果
 
 ## 8. Git 协作建议
-
-你后续准备做多人协作，建议从一开始就按规范建立仓库习惯，而不是等冲突变多后再补。
 
 ### 推荐分支模型
 
@@ -233,30 +231,9 @@ git commit -m "docs(readme): add project onboarding guide"
 - 接口字段变更前先同步前后端和算法同学
 - 文档和代码尽量一起提交
 
-## 9. 仓库初始化建议
+## 9. 相关文档
 
-当前目录看起来还没有正式初始化 Git 仓库。如果你准备开始多人协作，建议尽快完成以下动作：
-
-```bash
-git init
-git checkout -b main
-git checkout -b develop
-```
-
-然后补齐远程仓库并设置默认协作方式。
-
-同时建议尽快完善 `.gitignore`，至少继续补充以下内容：
-
-- Python 虚拟环境目录
-- `__pycache__/`
-- `backend/runtime/`
-- 模型权重文件
-- 本地日志和临时导出文件
-- IDE 配置目录
-
-## 10. 相关文档
-
-项目内已经有一些适合团队协作的规范文档，建议在正式多人开发前统一阅读：
+项目内已经有团队协作的规范文档，建议在开发前统一阅读：
 
 - [docs/Git_Standard.md](/D:/Codex/SrugAI/CholecInsight/docs/Git_Standard.md)
 - [docs/PULL_REQUEST_TEMPLATE.md](/D:/Codex/SrugAI/CholecInsight/docs/PULL_REQUEST_TEMPLATE.md)
@@ -268,17 +245,3 @@ git checkout -b develop
 - `docs/data-schema.md`
 - `docs/model-input-output.md`
 - `docs/deployment.md`
-
-## 11. 后续建议
-
-如果 CholecInsight 接下来要进入多人并行开发阶段，优先建议做这几件事：
-
-1. 初始化 Git 仓库并建立 `main/develop` 分支模型
-2. 补充 `.gitignore`，避免把运行时文件和大文件误提交
-3. 增加统一的环境配置说明，例如 `.env.example`
-4. 明确前后端与算法之间的接口协议和字段定义
-5. 逐步把“浏览器本地存储”迁移到后端持久化方案
-
----
-
-如果你愿意，下一步我可以继续帮你把这份 README 再往前推进一层，顺手把 `.gitignore` 和一个适合团队使用的 `.env.example` 也一起补上。 
