@@ -220,8 +220,10 @@ function loadProjects() {
 function statusClass(status) {
   if (status === '草稿') return 'bg-amber-100 text-amber-700'
   if (status === '正在上传') return 'bg-sky-100 text-sky-700'
+  if (status === '待分析') return 'bg-slate-100 text-slate-700'
   if (status === '正在分析') return 'bg-blue-100 text-blue-700'
-  if (status === '完成') return 'bg-emerald-100 text-emerald-700'
+  if (status === '分析完成' || status === '完成') return 'bg-emerald-100 text-emerald-700'
+  if (status === '分析失败') return 'bg-red-100 text-red-700'
   return 'bg-slate-100 text-slate-700'
 }
 
@@ -278,7 +280,7 @@ async function createProject() {
     await saveProjectVideo(projectId, selectedVideoFile.value)
     project = {
       ...project,
-      status: '正在分析',
+      status: '待分析',
       updatedAt: new Date().toISOString(),
       updatedAtLabel: new Date().toLocaleString('zh-CN'),
     }
@@ -292,18 +294,8 @@ async function createProject() {
 }
 
 function openAnalysis(project) {
-  const nextProject =
-    project.status === '完成' || project.status === '草稿'
-      ? project
-      : {
-          ...project,
-          status: '正在分析',
-          updatedAt: new Date().toISOString(),
-          updatedAtLabel: new Date().toLocaleString('zh-CN'),
-        }
-
-  saveProject(nextProject)
-  setActiveProject(nextProject)
+  saveProject(project)
+  setActiveProject(project)
   router.push('/analysis')
 }
 

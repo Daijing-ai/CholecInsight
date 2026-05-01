@@ -1,6 +1,4 @@
-﻿from typing import Optional
-
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from job_manager import PhaseJobManager
@@ -22,27 +20,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-service = PhaseInferenceService()
-job_manager = PhaseJobManager(service)
+job_manager = PhaseJobManager(service_factory=PhaseInferenceService)
 
 
 @app.get("/health")
 def health():
-    return service.health()
+    if job_manager.is_service_loaded():
+        return job_manager.service.health()
+
+    return {
+        "status": "ok",
+        "model_loaded": False,
+        "message": "Phase inference model will be loaded when the first analysis job runs.",
+    }
 
 
 @app.post("/api/phase/jobs")
 async def create_phase_job(
-    request: Request,
+    file: UploadFile = File(...),
     sample_seconds: float = 2.0,
-    x_file_name: Optional[str] = Header(default=None),
 ):
     try:
-        raw_content = await request.body()
-        if not raw_content:
-            raise HTTPException(status_code=400, detail="上传内容为空。")
-
-        return job_manager.create_job(raw_content, x_file_name or "video.mp4", sample_seconds=sample_seconds)
+        return await job_manager.create_job_from_upload(file, sample_seconds=sample_seconds)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

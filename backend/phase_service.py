@@ -82,7 +82,8 @@ class PhaseInferenceService:
             "phase_count": len(PHASE_DEFINITIONS),
         }
 
-    def analyze_video(self, video_path, sample_seconds=2.0, confidence_threshold=0.65):
+    def analyze_video(self, video_path, sample_seconds=2.0, confidence_threshold=0.65, progress_callback=None):
+        self._report_progress(progress_callback, "preprocessing", "数据预处理", "正在读取视频信息并计算采样间隔。", 20)
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
             raise ValueError("无法打开待分析视频文件。")
@@ -97,8 +98,10 @@ class PhaseInferenceService:
 
         self.model.reset()
 
+        self._report_progress(progress_callback, "inference", "模型推理", "正在对采样帧执行阶段识别推理。", 35)
+        total_samples = max(len(sample_indices), 1)
         with torch.inference_mode():
-            for frame_index in sample_indices:
+            for sample_index, frame_index in enumerate(sample_indices):
                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
                 success, frame = cap.read()
                 if not success:
@@ -122,9 +125,19 @@ class PhaseInferenceService:
                         "confidence": round(float(confidence.item()), 4),
                     }
                 )
+                if sample_index == len(sample_indices) - 1 or sample_index % 5 == 0:
+                    progress = 35 + int(((sample_index + 1) / total_samples) * 50)
+                    self._report_progress(
+                        progress_callback,
+                        "inference",
+                        "模型推理",
+                        f"正在分析采样帧 {sample_index + 1}/{total_samples}。",
+                        min(progress, 85),
+                    )
 
         cap.release()
 
+        self._report_progress(progress_callback, "postprocessing", "整理结果", "正在合并阶段片段并生成时间线。", 90)
         segments = self._merge_predictions(predictions, duration)
         steps = [segment for segment in segments if segment["confidence"] >= confidence_threshold]
         if not steps and segments:
@@ -146,6 +159,11 @@ class PhaseInferenceService:
             "predictions": predictions,
             "distribution": phase_distribution,
         }
+
+    @staticmethod
+    def _report_progress(progress_callback, stage, label, message, progress):
+        if progress_callback:
+            progress_callback(stage, label, message, progress)
 
     def _merge_predictions(self, predictions, duration):
         if not predictions:

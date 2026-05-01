@@ -5,6 +5,10 @@ function buildPhaseAnalysisState(job) {
   return {
     jobId: job.jobId,
     status: job.status,
+    stage: job.stage || '',
+    stageLabel: job.stageLabel || '',
+    message: job.message || '',
+    progress: job.progress || 0,
     fileName: job.fileName,
     sampleSeconds: job.sampleSeconds,
     createdAt: job.createdAt,
@@ -16,8 +20,16 @@ function buildPhaseAnalysisState(job) {
 
 export function applyPhaseAnalysisToProject(project, job) {
   const phaseAnalysis = buildPhaseAnalysisState(job)
+  const statusMap = {
+    queued: '正在分析',
+    running: '正在分析',
+    completed: '分析完成',
+    failed: '分析失败',
+  }
+
   return {
     ...project,
+    status: statusMap[job.status] || project.status || '待分析',
     phaseAnalysis,
     updatedAt: job.updatedAt || new Date().toISOString(),
     updatedAtLabel: new Date(job.updatedAt || Date.now()).toLocaleString('zh-CN'),

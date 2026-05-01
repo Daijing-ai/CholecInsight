@@ -1,5 +1,12 @@
 ﻿<template>
   <div class="container mx-auto px-4 py-6">
+    <transition name="toast-slide">
+      <div v-if="statusMessage" :class="['top-toast', statusType === 'error' ? 'error' : 'success']">
+        <i class="fas" :class="statusType === 'error' ? 'fa-circle-exclamation' : 'fa-circle-check'"></i>
+        <span>{{ statusMessage }}</span>
+      </div>
+    </transition>
+
     <div class="flex justify-between items-center mb-6 flex-wrap gap-3">
       <h1 class="text-2xl font-bold text-gray-800 flex items-center">
         <i class="fas fa-chart-line mr-2 text-blue-500"></i>手术视频分析
@@ -9,7 +16,7 @@
           <i class="fas fa-upload mr-2"></i>上传视频
         </button>
         <input ref="videoFileInput" class="hidden" type="file" accept="video/*" @change="onVideoSelected" />
-        <button class="btn-secondary" @click="exportAnnotations" :disabled="!annotations.length">
+        <button class="btn-secondary" @click="exportAnnotations">
           <i class="fas fa-share-alt mr-2"></i>导出标注
         </button>
         <button class="btn-secondary" :class="isTracking ? 'btn-active' : ''" @click="toggleTracking">
@@ -35,7 +42,7 @@
               @loadedmetadata="onLoadedMetadata"
               @canplay="setCanvasSize"
               @timeupdate="onTimeUpdate"
-              @click.stop.prevent="onVideoClick"
+              @click.stop.prevent="toggleVideoPlayback"
               v-show="uploadedVideoUrl"
             ></video>
             <img :src="analysisImageSrc" alt="手术视频" class="w-full h-full object-cover" v-show="!uploadedVideoUrl" />
@@ -52,10 +59,10 @@
           </div>
 
           <div class="seg-toolbar-external">
-            <button class="seg-btn" :class="isAddPositive ? 'seg-btn-active' : ''" @click="isAddPositive = true">
+            <button class="seg-btn" :class="isAddPositive ? 'seg-btn-active' : ''" @click="setPointMode(true)">
               <i class="fas fa-plus-circle text-green-600 mr-1"></i>正样本
             </button>
-            <button class="seg-btn" :class="!isAddPositive ? 'seg-btn-active neg' : ''" @click="isAddPositive = false">
+            <button class="seg-btn" :class="!isAddPositive ? 'seg-btn-active neg' : ''" @click="setPointMode(false)">
               <i class="fas fa-minus-circle text-red-500 mr-1"></i>负样本
             </button>
             <button class="seg-btn" @click="clearPoints">
@@ -98,19 +105,43 @@
 
           <div class="note-panel">
             <div class="note-form">
-              <input v-model="noteTimeInput" class="input note-time" placeholder="mm:ss" />
-              <input v-model="noteTextInput" class="input note-text" placeholder="输入文字标注内容" />
-              <button class="btn-secondary compact" @click="addNote">添加文字标注</button>
+              <button
+                class="annotation-timer"
+                :class="isTimingAnnotation ? 'recording' : ''"
+                :title="isTimingAnnotation ? '结束计时' : '开始计时'"
+                @click="toggleAnnotationTimer"
+              >
+                <i class="fas" :class="isTimingAnnotation ? 'fa-stop' : 'fa-clock'"></i>
+                <span>{{ annotationIntervalLabel }}</span>
+              </button>
+              <input v-model="noteTimeInput" class="input note-time" placeholder="mm:ss - mm:ss" style="width: 130px;" />
+              <input v-model="noteTextInput" class="input note-text" placeholder="输入文字注释内容" style="width: 200px;" />
+              <button class="btn-secondary compact" @click="addNote">添加注释</button>
+              <button class="btn-secondary compact" @click="clearAnnotationTimer">
+                清除计时
+              </button>
+              <button v-if="activeLoopNoteId" class="btn-secondary compact" @click="exitNoteLoop">
+                退出循环
+              </button>
             </div>
             <div class="note-list">
-              <div v-show="!notesSorted.length" class="note-empty">暂无文字标注</div>
+              <div v-show="!notesSorted.length" class="note-empty">暂无文字注释</div>
               <div v-show="notesSorted.length">
-                <div v-for="note in notesSorted" :key="note.id" class="note-row">
+                <div
+                  v-for="note in notesSorted"
+                  :key="note.id"
+                  class="note-row"
+                  :class="activeLoopNoteId === note.id ? 'active-loop' : ''"
+                  @click="playNoteLoop(note)"
+                >
                   <div>
-                    <p class="note-time-label"><i class="fas fa-clock"></i> {{ formatTimeLabel(note.time) }}</p>
+                    <p class="note-time-label"><i class="fas fa-clock"></i> {{ formatNoteRange(note) }}</p>
                     <p class="note-text">{{ note.text }}</p>
                   </div>
-                  <button class="note-delete" @click="removeNote(note.id)"><i class="fas fa-trash"></i></button>
+                  <div class="note-actions">
+                    <span v-if="activeLoopNoteId === note.id" class="loop-chip">循环播放中</span>
+                    <button class="note-delete" @click.stop="removeNote(note.id)"><i class="fas fa-trash"></i></button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -141,10 +172,6 @@
                   <span class="font-semibold text-slate-800">{{ currentProject?.date || '未填写' }}</span>
                 </div>
                 <div class="flex justify-between items-center text-sm">
-                  <span class="text-gray-500">当前时间</span>
-                  <span class="font-semibold text-slate-800">{{ formatTimeLabel(currentTime) }}</span>
-                </div>
-                <div class="flex justify-between items-center text-sm">
                   <span class="text-gray-500">视频总时长</span>
                   <span class="font-semibold text-slate-800">{{ formatTimeLabel(duration || 165) }}</span>
                 </div>
@@ -164,7 +191,6 @@
               </div>
             </div>
 
-            <div v-if="statusMessage" :class="['status-box', statusType === 'error' ? 'error' : 'success']">{{ statusMessage }}</div>
           </div>
 
           <div class="bg-gray-50 p-4 rounded-lg">
@@ -228,13 +254,26 @@
           <span v-if="phaseAnalysisResult?.meta" class="text-sm text-slate-500">
             已采样 {{ phaseAnalysisResult.meta.sampleCount }} 帧，设备 {{ phaseAnalysisResult.meta.device }}
           </span>
-          <span v-if="currentProject?.phaseAnalysis?.status" class="text-sm text-slate-500">
-            任务状态：{{ currentProject.phaseAnalysis.status === 'queued' ? '排队中' : currentProject.phaseAnalysis.status === 'running' ? '分析中' : currentProject.phaseAnalysis.status === 'completed' ? '已完成' : currentProject.phaseAnalysis.status === 'failed' ? '失败' : currentProject.phaseAnalysis.status }}
+          <span v-if="phaseAnalysisState?.status" class="text-sm text-slate-500">
+            任务状态：{{ phaseStatusLabel }}
           </span>
-          <button class="btn-secondary" :disabled="phaseLoading || !projectVideoFile || ['queued', 'running'].includes(currentProject?.phaseAnalysis?.status)" @click="runPhaseAnalysis">
+          <button class="btn-secondary" :disabled="phaseLoading || isPhaseRunning" @click="runPhaseAnalysis">
             <i class="fas" :class="phaseLoading ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>
-            <span class="ml-2">{{ phaseLoading ? '提交中' : ['queued', 'running'].includes(currentProject?.phaseAnalysis?.status) ? '后台分析进行中' : '开始关键步骤分析' }}</span>
+            <span class="ml-2">{{ phaseLoading ? '提交中' : isPhaseRunning ? '后台分析进行中' : '开始关键步骤分析' }}</span>
           </button>
+        </div>
+      </div>
+
+      <div v-if="phaseAnalysisState" class="phase-progress-panel">
+        <div class="flex justify-between items-center gap-3 flex-wrap">
+          <div>
+            <p class="phase-stage">{{ phaseAnalysisState.stageLabel || phaseStatusLabel }}</p>
+            <p class="phase-message">{{ phaseAnalysisState.message || '等待关键步骤分析任务更新。' }}</p>
+          </div>
+          <span class="phase-percent">{{ phaseAnalysisState.progress || 0 }}%</span>
+        </div>
+        <div class="phase-progress-track">
+          <div class="phase-progress-bar" :style="{ width: `${phaseAnalysisState.progress || 0}%` }"></div>
         </div>
       </div>
 
@@ -246,7 +285,7 @@
         {{ phaseError }}
       </div>
 
-      <div v-else-if="['queued', 'running'].includes(currentProject?.phaseAnalysis?.status)" class="empty">
+      <div v-else-if="isPhaseRunning" class="empty">
         关键步骤分析正在后台运行。你现在可以离开当前页面继续查看其他项目，稍后返回时结果会自动同步并保存到当前项目。
       </div>
 
@@ -310,8 +349,14 @@ const statusMessage = ref('')
 const statusType = ref('success')
 
 const notes = ref([])
-const noteTimeInput = ref('00:30')
+const noteTimeInput = ref('')
 const noteTextInput = ref('')
+const annotationTimerStart = ref(null)
+const annotationTimerEnd = ref(null)
+const isTimingAnnotation = ref(false)
+const activeLoopNoteId = ref(null)
+const activeLoopRange = ref(null)
+let statusTimer = null
 
 const currentTime = ref(0)
 const duration = ref(165)
@@ -358,9 +403,33 @@ const progressPercent = computed(() => {
   return `${(ratio * 100).toFixed(1)}%`
 })
 
+const shouldRequireVideo = computed(() => {
+  if (!currentProject.value) return true
+  return currentProject.value.status === '草稿' || !projectVideoFile.value || !uploadedVideoUrl.value
+})
+
 const notesSorted = computed(() => notes.value.slice().sort((a, b) => a.time - b.time))
 
+const annotationIntervalLabel = computed(() => {
+  if (annotationTimerStart.value === null) return '计时'
+  if (annotationTimerEnd.value === null) return `${formatTimeLabel(annotationTimerStart.value)} - ...`
+  return `${formatTimeLabel(annotationTimerStart.value)} - ${formatTimeLabel(annotationTimerEnd.value)}`
+})
+
 const generatedSteps = computed(() => phaseAnalysisResult.value?.steps || [])
+
+const phaseAnalysisState = computed(() => currentProject.value?.phaseAnalysis || null)
+
+const isPhaseRunning = computed(() => ['queued', 'running'].includes(phaseAnalysisState.value?.status))
+
+const phaseStatusLabel = computed(() => {
+  const status = phaseAnalysisState.value?.status
+  if (status === 'queued') return '排队中'
+  if (status === 'running') return '分析中'
+  if (status === 'completed') return '分析完成'
+  if (status === 'failed') return '分析失败'
+  return status || '待分析'
+})
 
 const anomalyStatus = computed(() => {
   return { label: '待接入', toneClass: 'text-slate-500' }
@@ -368,6 +437,25 @@ const anomalyStatus = computed(() => {
 
 function triggerVideoUpload() {
   videoFileInput.value?.click()
+}
+
+function requireVideoBeforeAction() {
+  if (!shouldRequireVideo.value) return false
+  showStatus('请先上传视频后再进行操作', 'error')
+  return true
+}
+
+function persistProjectNotes() {
+  if (!currentProject.value) return
+  const updatedProject = {
+    ...currentProject.value,
+    notes: notes.value,
+    updatedAt: new Date().toISOString(),
+    updatedAtLabel: new Date().toLocaleString('zh-CN'),
+  }
+  currentProject.value = updatedProject
+  saveProject(updatedProject)
+  setActiveProject(updatedProject)
 }
 
 function revokeUploadedVideoUrl() {
@@ -414,7 +502,23 @@ function onLoadedMetadata() {
 
 function onTimeUpdate() {
   currentTime.value = videoEl.value?.currentTime || 0
+  syncLoopPlayback()
   if (isTracking.value) updateMaskTracking()
+}
+
+function syncLoopPlayback() {
+  if (!videoEl.value || !activeLoopRange.value) return
+
+  const { startTime, endTime } = activeLoopRange.value
+  if (currentTime.value < startTime) {
+    videoEl.value.currentTime = startTime
+    return
+  }
+
+  if (currentTime.value >= endTime) {
+    videoEl.value.currentTime = startTime
+    videoEl.value.play?.()
+  }
 }
 
 function updateMaskTracking() {
@@ -454,28 +558,53 @@ function markerLeft(time) {
   return `${(ratio * 100).toFixed(2)}%`
 }
 
-function onVideoClick(event) {
-  if (!uploadedVideoUrl.value || !videoEl.value || !videoContainer.value || isProcessing.value) return
-
-  const videoRect = videoEl.value.getBoundingClientRect()
-  const offsetX = event.clientX - videoRect.left
-  const offsetY = event.clientY - videoRect.top
-  const canvasWidth = maskCanvas.value?.width || videoRect.width
-  const canvasHeight = maskCanvas.value?.height || videoRect.height
-
-  const pointX = Math.round((offsetX / videoRect.width) * canvasWidth)
-  const pointY = Math.round((offsetY / videoRect.height) * canvasHeight)
-
-  if (isAddPositive.value) {
-    positivePoints.value.push({ x: pointX, y: pointY })
+function toggleVideoPlayback() {
+  if (requireVideoBeforeAction()) return
+  if (!videoEl.value) return
+  if (videoEl.value.paused) {
+    videoEl.value.play?.()
   } else {
-    negativePoints.value.push({ x: pointX, y: pointY })
+    videoEl.value.pause()
+  }
+}
+
+function toggleAnnotationTimer() {
+  if (requireVideoBeforeAction()) return
+  const seconds = videoEl.value?.currentTime ?? currentTime.value
+  if (!Number.isFinite(seconds)) return
+
+  if (!isTimingAnnotation.value) {
+    annotationTimerStart.value = seconds
+    annotationTimerEnd.value = null
+    isTimingAnnotation.value = true
+    noteTimeInput.value = `${formatTimeLabel(seconds)} - ...`
+    showStatus('注释开始时间已记录', 'success')
+    return
   }
 
-  showStatus(`${isAddPositive.value ? '正' : '负'}样本点已添加 (${pointX}, ${pointY})`, 'success')
+  const start = annotationTimerStart.value ?? seconds
+  annotationTimerStart.value = Math.min(start, seconds)
+  annotationTimerEnd.value = Math.max(start, seconds)
+  isTimingAnnotation.value = false
+  noteTimeInput.value = `${formatTimeLabel(annotationTimerStart.value)} - ${formatTimeLabel(annotationTimerEnd.value)}`
+  showStatus('注释结束时间已记录，可输入文字内容保存', 'success')
+}
+
+function clearAnnotationTimer() {
+  if (requireVideoBeforeAction()) return
+  annotationTimerStart.value = null
+  annotationTimerEnd.value = null
+  isTimingAnnotation.value = false
+  noteTimeInput.value = ''
+}
+
+function setPointMode(isPositive) {
+  if (requireVideoBeforeAction()) return
+  isAddPositive.value = isPositive
 }
 
 function clearPoints() {
+  if (requireVideoBeforeAction()) return
   positivePoints.value = []
   negativePoints.value = []
 }
@@ -488,6 +617,7 @@ function onOpacityChange() {
 }
 
 async function runSegmentation() {
+  if (requireVideoBeforeAction()) return
   if (!positivePoints.value.length) {
     showStatus('请至少添加一个正样本点', 'error')
     return
@@ -516,6 +646,7 @@ async function runSegmentation() {
 }
 
 async function runPhaseAnalysis() {
+  if (requireVideoBeforeAction()) return
   if (!projectVideoFile.value) {
     phaseError.value = '当前项目没有可分析的视频文件。'
     return
@@ -665,11 +796,13 @@ function clearCanvas() {
 }
 
 function toggleTracking() {
+  if (requireVideoBeforeAction()) return
   isTracking.value = !isTracking.value
   showStatus(`实时追踪已${isTracking.value ? '开启' : '关闭'}`, 'success')
 }
 
 function exportAnnotations() {
+  if (requireVideoBeforeAction()) return
   if (!annotations.value.length) return
   const blob = new Blob([JSON.stringify(annotations.value, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
@@ -681,6 +814,7 @@ function exportAnnotations() {
 }
 
 function exportSummary() {
+  if (requireVideoBeforeAction()) return
   const payload = {
     project: currentProject.value,
     annotations: annotations.value,
@@ -699,6 +833,7 @@ function exportSummary() {
   if (currentProject.value) {
     const updatedProject = {
       ...currentProject.value,
+      notes: notes.value,
       status: '完成',
       updatedAt: new Date().toISOString(),
       updatedAtLabel: new Date().toLocaleString('zh-CN'),
@@ -713,8 +848,10 @@ function exportSummary() {
 function statusClass(status) {
   if (status === '草稿') return 'bg-amber-100 text-amber-700'
   if (status === '正在上传') return 'bg-sky-100 text-sky-700'
+  if (status === '待分析') return 'bg-slate-100 text-slate-700'
   if (status === '正在分析') return 'bg-blue-100 text-blue-700'
-  if (status === '完成') return 'bg-emerald-100 text-emerald-700'
+  if (status === '分析完成' || status === '完成') return 'bg-emerald-100 text-emerald-700'
+  if (status === '分析失败') return 'bg-red-100 text-red-700'
   return 'bg-slate-100 text-slate-700'
 }
 
@@ -770,10 +907,14 @@ function formatConfidence(value) {
 }
 
 function showStatus(message, type = 'success') {
+  if (statusTimer) {
+    window.clearTimeout(statusTimer)
+  }
   statusMessage.value = message
   statusType.value = type
-  setTimeout(() => {
+  statusTimer = window.setTimeout(() => {
     statusMessage.value = ''
+    statusTimer = null
   }, 2400)
 }
 
@@ -785,26 +926,105 @@ function parseTime(text) {
   return minutes * 60 + seconds
 }
 
+function parseTimeRange(text) {
+  const parts = text.split('-').map((item) => item.trim()).filter(Boolean)
+  if (!parts.length || parts.some((part) => part === '...')) {
+    return null
+  }
+
+  const start = parseTime(parts[0])
+  const end = parts[1] ? parseTime(parts[1]) : start
+  if (!Number.isFinite(start) || !Number.isFinite(end)) {
+    return null
+  }
+
+  return {
+    startTime: Math.min(start, end),
+    endTime: Math.max(start, end),
+  }
+}
+
 function addNote() {
-  const seconds = parseTime(noteTimeInput.value.trim())
-  if (!Number.isFinite(seconds)) {
-    showStatus('请输入 mm:ss 格式时间', 'error')
+  if (requireVideoBeforeAction()) return
+  const range = parseTimeRange(noteTimeInput.value.trim())
+  if (!range) {
+    showStatus('请先用计时器记录时间段，或输入 mm:ss - mm:ss 格式时间', 'error')
     return
   }
   if (!noteTextInput.value.trim()) {
-    showStatus('请输入文字标注内容', 'error')
+    showStatus('请输入文字注释内容', 'error')
     return
   }
-  notes.value = [...notes.value, { id: Date.now(), time: seconds, text: noteTextInput.value.trim() }]
+  notes.value = [
+    ...notes.value,
+    {
+      id: Date.now(),
+      time: range.startTime,
+      startTime: range.startTime,
+      endTime: range.endTime,
+      text: noteTextInput.value.trim(),
+    },
+  ]
+  persistProjectNotes()
   noteTextInput.value = ''
-  showStatus('文字标注已添加', 'success')
+  clearAnnotationTimer()
+  showStatus('文字注释已添加', 'success')
+}
+
+function formatNoteRange(note) {
+  const start = note.startTime ?? note.time
+  const end = note.endTime ?? note.time
+  if (!Number.isFinite(end) || end === start) {
+    return formatTimeLabel(start)
+  }
+  return `${formatTimeLabel(start)} - ${formatTimeLabel(end)}`
+}
+
+function playNoteLoop(note) {
+  if (requireVideoBeforeAction()) return
+  if (!videoEl.value) {
+    showStatus('请先加载视频后再播放注释片段', 'error')
+    return
+  }
+
+  if (activeLoopNoteId.value === note.id) {
+    exitNoteLoop()
+    return
+  }
+
+  const startTime = note.startTime ?? note.time
+  const endTime = note.endTime ?? note.time
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime <= startTime) {
+    showStatus('该注释没有有效的时间区间', 'error')
+    return
+  }
+
+  activeLoopNoteId.value = note.id
+  activeLoopRange.value = { startTime, endTime }
+  videoEl.value.currentTime = startTime
+  videoEl.value.play?.()
+  showStatus(`正在循环播放注释片段 ${formatTimeLabel(startTime)} - ${formatTimeLabel(endTime)}`, 'success')
+}
+
+function exitNoteLoop() {
+  if (requireVideoBeforeAction()) return
+  activeLoopNoteId.value = null
+  activeLoopRange.value = null
+  showStatus('已退出注释片段循环播放', 'success')
 }
 
 function removeNote(id) {
+  if (requireVideoBeforeAction()) return
+  if (activeLoopNoteId.value === id) {
+    activeLoopNoteId.value = null
+    activeLoopRange.value = null
+  }
   notes.value = notes.value.filter((item) => item.id !== id)
+  persistProjectNotes()
 }
 
 function seekTo(seconds) {
+  if (requireVideoBeforeAction()) return
   if (!videoEl.value) return
   videoEl.value.currentTime = seconds
   currentTime.value = seconds
@@ -812,21 +1032,11 @@ function seekTo(seconds) {
 
 onMounted(() => {
   currentProject.value = getActiveProject()
+  notes.value = Array.isArray(currentProject.value?.notes) ? currentProject.value.notes : []
   phaseAnalysisResult.value = currentProject.value?.phaseAnalysis?.result || null
   phaseError.value = currentProject.value?.phaseAnalysis?.error || ''
   phaseJobStatus.value = currentProject.value?.phaseAnalysis?.status || ''
 
-  if (currentProject.value && currentProject.value.status !== '草稿' && currentProject.value.status !== '完成') {
-    const updatedProject = {
-      ...currentProject.value,
-      status: '正在分析',
-      updatedAt: new Date().toISOString(),
-      updatedAtLabel: new Date().toLocaleString('zh-CN'),
-    }
-    currentProject.value = updatedProject
-    saveProject(updatedProject)
-    setActiveProject(updatedProject)
-  }
   if (currentProject.value?.videoUrl) {
     uploadedVideoUrl.value = currentProject.value.videoUrl
   } else if (currentProject.value?.hasVideo) {
@@ -867,6 +1077,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopPhasePolling()
+  if (statusTimer) {
+    window.clearTimeout(statusTimer)
+    statusTimer = null
+  }
   revokeUploadedVideoUrl()
   window.removeEventListener('resize', setCanvasSize)
   if (videoEl.value) {
@@ -910,6 +1124,24 @@ const analysisImageSrc =
   height: 100%;
   pointer-events: none;
 }
+.annotation-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 86px;
+  justify-content: center;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #0f172a;
+  color: white;
+  border: 1px solid #1e293b;
+  font-size: 13px;
+  font-weight: 800;
+}
+.annotation-timer.recording {
+  background: #dc2626;
+  border-color: #b91c1c;
+}
 .points-layer {
   position: absolute;
   inset: 0;
@@ -927,7 +1159,7 @@ const analysisImageSrc =
 .point-positive { background-color: rgba(34, 197, 94, 0.95); }
 .point-negative { background-color: rgba(239, 68, 68, 0.95); }
 .video-container,
-.video-container video { cursor: crosshair; }
+.video-container video { cursor: default; }
 .seg-btn {
   display: inline-flex;
   align-items: center;
@@ -981,8 +1213,33 @@ const analysisImageSrc =
   border: 1px solid #e5e7eb;
   border-radius: 10px;
   background: #fff;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+.note-row:hover {
+  border-color: #bfdbfe;
+  background: #f8fafc;
+}
+.note-row.active-loop {
+  border-color: #2563eb;
+  background: #eff6ff;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 .note-time-label { font-weight: 700; color: #0f172a; font-size: 13px; }
+.note-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.loop-chip {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
 .note-delete {
   background: #fef2f2;
   color: #b91c1c;
@@ -1014,6 +1271,41 @@ const analysisImageSrc =
 }
 .seg-mini.danger { background: #fef2f2; border-color: #fecdd3; color: #b91c1c; }
 .empty { margin-top: 12px; padding: 12px; border: 1px dashed #e5e7eb; border-radius: 10px; color: #64748b; font-size: 13px; background: #f8fafc; }
+.top-toast {
+  position: fixed;
+  top: 84px;
+  left: 50%;
+  z-index: 9999;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 800;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.22);
+  transform: translateX(-50%);
+}
+.top-toast.success {
+  background: #ecfdf3;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+.top-toast.error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+.toast-slide-enter-active,
+.toast-slide-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.toast-slide-enter-from,
+.toast-slide-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -10px);
+}
 .status-box {
   margin-top: 12px;
   padding: 10px 12px;
@@ -1023,4 +1315,37 @@ const analysisImageSrc =
 }
 .status-box.success { background: #ecfdf3; color: #166534; border: 1px solid #bbf7d0; }
 .status-box.error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+.phase-progress-panel {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #eff6ff;
+}
+.phase-stage {
+  font-weight: 800;
+  color: #1e3a8a;
+}
+.phase-message {
+  margin-top: 2px;
+  font-size: 13px;
+  color: #475569;
+}
+.phase-percent {
+  font-weight: 800;
+  color: #2563eb;
+}
+.phase-progress-track {
+  height: 8px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dbeafe;
+}
+.phase-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(135deg, #2563eb, #0ea5e9);
+  transition: width 0.2s ease;
+}
 </style>
