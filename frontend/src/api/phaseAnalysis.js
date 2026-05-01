@@ -2,13 +2,12 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8001
 
 export async function createPhaseAnalysisJob(file, options = {}) {
   const sampleSeconds = options.sampleSeconds ?? 2
+  const formData = new FormData()
+  formData.append('file', file, file.name || 'video.mp4')
+
   const response = await fetch(`${API_BASE_URL}/api/phase/jobs?sample_seconds=${encodeURIComponent(sampleSeconds)}`, {
     method: 'POST',
-    headers: {
-      'Content-Type': file.type || 'application/octet-stream',
-      'X-File-Name': file.name,
-    },
-    body: file,
+    body: formData,
   })
 
   const payload = await response.json().catch(() => null)
