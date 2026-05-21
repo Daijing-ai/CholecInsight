@@ -1,5 +1,12 @@
 ﻿<template>
-  <div class="container mx-auto px-4 py-6">
+  <div class="home-page px-4 sm:px-6 lg:px-8 py-6">
+    <transition name="toast-slide">
+      <div v-if="statusMessage" :class="['top-toast', statusType === 'error' ? 'error' : 'success']">
+        <i class="fas" :class="statusType === 'error' ? 'fa-circle-exclamation' : 'fa-circle-check'"></i>
+        <span>{{ statusMessage }}</span>
+      </div>
+    </transition>
+
     <section class="bg-white rounded-lg shadow-md p-6 mb-6">
       <div class="flex justify-between items-center flex-wrap gap-4">
         <div>
@@ -41,7 +48,7 @@
         </button>
       </div>
 
-      <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div v-else class="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-4">
         <article
           v-for="project in projects"
           :key="project.id"
@@ -88,7 +95,7 @@
             <button class="btn-secondary" @click.stop="removeProjectItem(project)">
               <i class="fas fa-trash mr-2"></i>删除项目
             </button>
-            <button class="btn-secondary" @click.stop="cloneProject(project)">
+            <button class="btn-secondary" @click.stop="editProject(project)">
               <i class="fas fa-copy mr-2"></i>修改信息
             </button>
           </div>
@@ -100,8 +107,8 @@
       <div class="modal-panel bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
         <div class="flex items-center justify-between border-b border-slate-200 px-6 py-5">
           <div>
-            <h2 class="text-2xl font-bold text-slate-800">创建视频项目</h2>
-            <p class="text-sm text-slate-500 mt-1">填写项目描述并上传视频，创建后会直接进入对应的分析页。</p>
+            <h2 class="text-2xl font-bold text-slate-800">{{ editingProjectId ? '修改视频项目' : '创建视频项目' }}</h2>
+            <p class="text-sm text-slate-500 mt-1">{{ editingProjectId ? '修改项目描述和视频信息，保存后会更新原项目。' : '填写项目描述并上传视频，创建后会直接进入对应的分析页。' }}</p>
           </div>
           <button class="text-slate-400 hover:text-slate-700" @click="closeCreateModal">
             <i class="fas fa-xmark text-2xl"></i>
@@ -111,8 +118,15 @@
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 p-6">
           <div class="space-y-4">
             <div>
-              <label class="input-label">项目名称</label>
-              <input v-model="form.title" class="input" placeholder="例如：LC-病例-001" />
+              <label class="input-label">项目名称 <span class="required-mark">*</span></label>
+              <input
+                v-model="form.title"
+                class="input"
+                :class="formErrors.title ? 'input-error' : ''"
+                placeholder="例如：LC-病例-001"
+                @input="formErrors.title = ''"
+              />
+              <p v-if="formErrors.title" class="field-error">{{ formErrors.title }}</p>
             </div>
             <div>
               <label class="input-label">术式名称</label>
@@ -135,7 +149,9 @@
               </div>
               <div>
                 <label class="input-label">视频时长</label>
-                <input v-model="form.duration" class="input" placeholder="例如：32min" />
+                <div class="input bg-slate-50 text-slate-700">
+                  {{ form.duration || '上传后自动统计' }}
+                </div>
               </div>
             </div>
             <div>
@@ -146,7 +162,7 @@
 
           <div class="space-y-4">
             <div class="border border-dashed border-slate-300 rounded-xl p-6 bg-slate-50">
-              <h3 class="text-lg font-semibold text-slate-800 mb-3">视频文件</h3>
+              <h3 class="text-lg font-semibold text-slate-800 mb-3">视频文件 <span class="required-mark">*</span></h3>
               <button class="btn-primary mb-4" @click="triggerUpload">
                 <i class="fas fa-video mr-2"></i>选择手术视频
               </button>
@@ -154,6 +170,7 @@
               <p class="text-sm text-slate-500">当前项目的视频将在本次会话内直接用于分析页播放与标注。</p>
               <div v-if="form.fileName" class="mt-4 text-sm text-slate-700">
                 <p><span class="text-slate-400">文件名：</span>{{ form.fileName }}</p>
+                <p><span class="text-slate-400">视频时长：</span>{{ form.duration || '正在读取...' }}</p>
               </div>
             </div>
 
@@ -166,7 +183,7 @@
 
             <div class="flex gap-3 flex-wrap">
               <button class="btn-primary" @click="createProject">
-                <i class="fas fa-save mr-2"></i>创建并进入分析
+                <i class="fas fa-save mr-2"></i>{{ editingProjectId ? '保存修改' : '创建并进入分析' }}
               </button>
               <button class="btn-secondary" @click="closeCreateModal">
                 <i class="fas fa-arrow-left mr-2"></i>取消
@@ -184,15 +201,21 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { deleteProject, getProjects, saveProject, setActiveProject } from '../projectStore'
 import { syncRunningProjectsPhaseAnalysis } from '../phaseAnalysisStore'
-import { deleteProjectVideo, saveProjectVideo } from '../videoStore'
+import { deleteProjectVideo, getProjectVideo, saveProjectVideo } from '../videoStore'
 
 const router = useRouter()
 const projects = ref([])
 const showCreateModal = ref(false)
 const fileInputRef = ref(null)
 const form = ref(getEmptyForm())
+const formErrors = ref({ title: '' })
 const selectedVideoFile = ref(null)
+const statusMessage = ref('')
+const statusType = ref('success')
+const editingProjectId = ref('')
 let syncTimer = null
+let durationReadPromise = null
+let statusTimer = null
 
 const describedCount = computed(() => projects.value.filter((item) => item.description).length)
 const latestUpdated = computed(() => projects.value[0]?.updatedAtLabel || '暂无')
@@ -227,9 +250,24 @@ function statusClass(status) {
   return 'bg-slate-100 text-slate-700'
 }
 
+function showStatus(message, type = 'success') {
+  if (statusTimer) {
+    window.clearTimeout(statusTimer)
+  }
+  statusMessage.value = message
+  statusType.value = type
+  statusTimer = window.setTimeout(() => {
+    statusMessage.value = ''
+    statusTimer = null
+  }, 2400)
+}
+
 function openCreateModal() {
   form.value = getEmptyForm()
+  formErrors.value = { title: '' }
   selectedVideoFile.value = null
+  editingProjectId.value = ''
+  durationReadPromise = null
   showCreateModal.value = true
 }
 
@@ -238,6 +276,8 @@ function closeCreateModal() {
     URL.revokeObjectURL(form.value.videoUrl)
   }
   selectedVideoFile.value = null
+  editingProjectId.value = ''
+  durationReadPromise = null
   showCreateModal.value = false
 }
 
@@ -245,31 +285,86 @@ function triggerUpload() {
   fileInputRef.value?.click()
 }
 
-function onFileSelected(event) {
+async function onFileSelected(event) {
   const file = event.target.files?.[0]
   if (!file) return
   selectedVideoFile.value = file
+  formErrors.value.title = ''
   if (form.value.videoUrl && form.value.videoUrl.startsWith('blob:')) {
     URL.revokeObjectURL(form.value.videoUrl)
   }
   form.value.fileName = file.name
   form.value.videoUrl = URL.createObjectURL(file)
   form.value.hasVideo = true
+  form.value.duration = ''
+
+  try {
+    durationReadPromise = readVideoDuration(form.value.videoUrl)
+    form.value.duration = await durationReadPromise
+  } catch {
+    form.value.duration = '无法读取'
+  } finally {
+    durationReadPromise = null
+  }
+}
+
+function readVideoDuration(videoUrl) {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement('video')
+    video.preload = 'metadata'
+    video.onloadedmetadata = () => {
+      resolve(formatDuration(video.duration))
+      video.removeAttribute('src')
+      video.load()
+    }
+    video.onerror = () => {
+      reject(new Error('视频时长读取失败'))
+      video.removeAttribute('src')
+      video.load()
+    }
+    video.src = videoUrl
+  })
+}
+
+function formatDuration(secondsValue) {
+  if (!Number.isFinite(secondsValue) || secondsValue < 0) {
+    return ''
+  }
+
+  const totalSeconds = Math.round(secondsValue)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+  }
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
 async function createProject() {
   if (!form.value.title.trim()) {
+    formErrors.value.title = '请填写项目名称'
+    showStatus('请先填写必填项：项目名称', 'error')
     return
+  }
+  if (durationReadPromise) {
+    try {
+      form.value.duration = await durationReadPromise
+    } catch {
+      form.value.duration = form.value.duration || '无法读取'
+    }
   }
 
   const now = new Date()
-  const projectId = `project-${now.getTime()}`
+  const isEditing = Boolean(editingProjectId.value)
+  const projectId = editingProjectId.value || `project-${now.getTime()}`
   let project = {
     ...form.value,
     id: projectId,
-    hasVideo: Boolean(selectedVideoFile.value),
+    hasVideo: Boolean(selectedVideoFile.value) || Boolean(form.value.hasVideo),
     videoUrl: '',
-    status: selectedVideoFile.value ? '正在上传' : '草稿',
+    status: selectedVideoFile.value ? '正在上传' : form.value.status,
     updatedAt: now.toISOString(),
     updatedAtLabel: now.toLocaleString('zh-CN'),
   }
@@ -290,7 +385,11 @@ async function createProject() {
   setActiveProject(project)
   loadProjects()
   closeCreateModal()
-  router.push('/analysis')
+  if (isEditing) {
+    showStatus('项目信息已更新', 'success')
+  } else {
+    router.push('/analysis')
+  }
 }
 
 function openAnalysis(project) {
@@ -299,22 +398,46 @@ function openAnalysis(project) {
   router.push('/analysis')
 }
 
-function cloneProject(project) {
+async function editProject(project) {
+  if (form.value.videoUrl && form.value.videoUrl.startsWith('blob:')) {
+    URL.revokeObjectURL(form.value.videoUrl)
+  }
   form.value = {
-    title: `${project.title}-副本`,
+    title: project.title || '',
     procedure: project.procedure || '',
     surgeon: project.surgeon || '',
     department: project.department || '',
     date: project.date || '',
     duration: project.duration || '',
     description: project.description || '',
-    fileName: '',
+    fileName: project.fileName || '',
     videoUrl: '',
-    hasVideo: false,
-    status: '草稿',
+    hasVideo: Boolean(project.hasVideo),
+    status: project.status || '草稿',
+    phaseAnalysis: project.phaseAnalysis || null,
+    instrumentStats: project.instrumentStats || null,
+    notes: project.notes || [],
   }
+  editingProjectId.value = project.id
+  formErrors.value = { title: '' }
   selectedVideoFile.value = null
+  durationReadPromise = null
   showCreateModal.value = true
+
+  if (project.hasVideo || project.fileName) {
+    try {
+      const file = await getProjectVideo(project.id)
+      if (file && editingProjectId.value === project.id) {
+        form.value.videoUrl = URL.createObjectURL(file)
+      } else if (editingProjectId.value === project.id) {
+        showStatus('未找到原视频文件，请重新上传', 'error')
+      }
+    } catch {
+      if (editingProjectId.value === project.id) {
+        showStatus('原视频加载失败，请重新上传', 'error')
+      }
+    }
+  }
 }
 
 async function removeProjectItem(project) {
@@ -336,5 +459,64 @@ onBeforeUnmount(() => {
   if (syncTimer) {
     window.clearInterval(syncTimer)
   }
+  if (statusTimer) {
+    window.clearTimeout(statusTimer)
+  }
 })
 </script>
+
+<style scoped>
+.home-page {
+  width: 100%;
+  max-width: none;
+}
+.required-mark {
+  color: #dc2626;
+  font-weight: 800;
+}
+.field-error {
+  margin-top: 6px;
+  color: #dc2626;
+  font-size: 12px;
+  font-weight: 700;
+}
+.input-error {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.12);
+}
+.top-toast {
+  position: fixed;
+  top: 84px;
+  left: 50%;
+  z-index: 9999;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 800;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.22);
+  transform: translateX(-50%);
+}
+.top-toast.success {
+  background: #ecfdf3;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+.top-toast.error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+.toast-slide-enter-active,
+.toast-slide-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.toast-slide-enter-from,
+.toast-slide-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -10px);
+}
+</style>

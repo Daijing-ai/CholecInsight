@@ -1,4 +1,4 @@
-const DB_NAME = 'cholecinsight-media'
+const DB_NAME = 'surginsight-media'
 const DB_VERSION = 1
 const STORE_NAME = 'videos'
 

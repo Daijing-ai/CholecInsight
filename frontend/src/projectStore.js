@@ -1,5 +1,5 @@
-const PROJECTS_KEY = 'cholecinsight-projects'
-const ACTIVE_PROJECT_KEY = 'cholecinsight-active-project'
+const PROJECTS_KEY = 'surginsight-projects'
+const ACTIVE_PROJECT_KEY = 'surginsight-active-project'
 
 export function getProjects() {
   try {
