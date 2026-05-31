@@ -5,7 +5,7 @@
         <div class="flex items-center">
           <i class="fas fa-stethoscope text-2xl text-blue-600 mr-2"></i>
           <div>
-            <span class="text-xl font-bold text-gray-800">SurgReview</span>
+            <span class="text-xl font-bold text-gray-800">CholecInsight</span>
             <p class="text-xs text-gray-500">交互式智慧外科平台——赋能外科质控、科研与培训</p>
           </div>
         </div>
@@ -23,7 +23,7 @@
 
     <footer v-if="!isSplashPage && !isAnalysisPage" class="bg-gray-900 text-white py-6 mt-8">
       <div class="app-shell px-4 sm:px-6 lg:px-8 text-center text-gray-400 text-sm">
-        © 2026 SurgReview. 专注于数据驱动的外科见解。
+        © 2026 CholecInsight. 专注于数据驱动的外科见解。
       </div>
     </footer>
   </div>

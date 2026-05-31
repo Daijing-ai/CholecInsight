@@ -23,11 +23,11 @@ class PhaseModel:
                 param.requires_grad = False
 
         if not self.image_based and cnn_weight_path.exists():
-            checkpoint = torch.load(cnn_weight_path, map_location=self.device)
+            checkpoint = torch.load(cnn_weight_path, map_location=self.device,weights_only=False)
             self.net.cnn.load_state_dict(checkpoint["state_dict"])
 
         if head_weight_path.exists():
-            checkpoint = torch.load(head_weight_path, map_location=self.device)
+            checkpoint = torch.load(head_weight_path, map_location=self.device,weights_only=False)
             self.net.load_state_dict(checkpoint["state_dict"])
 
         self.net.eval()
