@@ -4,7 +4,7 @@
       <div class="splash-logo">
         <i class="fas fa-stethoscope"></i>
       </div>
-      <h1>SurgReview</h1>
+      <h1>CholecInsight</h1>
       <p>交互式智慧外科平台</p>
       <div class="splash-progress-shell">
         <div class="splash-progress-bar" :style="{ width: `${progress}%` }"></div>

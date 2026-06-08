@@ -1847,7 +1847,7 @@ const analysisImageSrc =
       </defs>
       <rect width="1280" height="720" fill="url(#g)"/>
       <g fill="#ffffff" opacity="0.9" font-family="Segoe UI, Arial" text-anchor="middle">
-        <text x="640" y="360" font-size="44" font-weight="700">SurgReview 分析示例</text>
+        <text x="640" y="360" font-size="44" font-weight="700">CholecInsight 分析示例</text>
         <text x="640" y="420" font-size="20" opacity="0.85">请上传或选择项目视频开始分析</text>
       </g>
     </svg>
