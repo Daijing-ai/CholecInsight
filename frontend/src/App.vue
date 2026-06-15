@@ -6,7 +6,7 @@
           <i class="fas fa-stethoscope text-2xl text-blue-600 mr-2"></i>
           <div>
             <span class="text-xl font-bold text-gray-800">CholecInsight</span>
-            <p class="text-xs text-gray-500">交互式智慧外科平台——赋能外科质控、科研与培训</p>
+            <p class="text-xs text-gray-500">面向腹腔镜胆囊切除术的质控与培训系统</p>
           </div>
         </div>
         <div class="flex space-x-4 text-sm">

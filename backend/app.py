@@ -8,6 +8,8 @@ from starlette.concurrency import run_in_threadpool
 
 from job_manager import PhaseJobManager
 from phase_service import PhaseInferenceService
+from tool_job_manager import ToolJobManager
+from tool_service import ToolDetectionService
 
 
 # Doubao Ark settings.
@@ -33,6 +35,7 @@ app.add_middleware(
 )
 
 job_manager = PhaseJobManager(service_factory=PhaseInferenceService)
+tool_job_manager = ToolJobManager(service_factory=ToolDetectionService)
 ark_client = None
 
 
@@ -166,6 +169,29 @@ async def get_phase_job(job_id: str):
     job = job_manager.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Phase analysis job was not found.")
+    return job
+
+
+@app.post("/api/tool/jobs")
+async def create_tool_job(
+    file: UploadFile = File(...),
+    sample_seconds: float = 2.0,
+):
+    try:
+        return await tool_job_manager.create_job_from_upload(file, sample_seconds=sample_seconds)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/tool/jobs/{job_id}")
+async def get_tool_job(job_id: str):
+    job = tool_job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Instrument detection job was not found.")
     return job
 
 

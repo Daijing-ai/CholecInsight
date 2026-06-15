@@ -7,6 +7,7 @@ import cv2
 import torch
 from albumentations.pytorch import ToTensorV2
 
+from cvs_evaluator import CVSEvaluator
 from phase_model import PhaseModel
 
 
@@ -66,6 +67,7 @@ class PhaseInferenceService:
         self.model_root = backend_dir if local_weights_dir.exists() else configured_root
         self.weights_dir = local_weights_dir if local_weights_dir.exists() else configured_root / "pretrained_weights"
         self.model = PhaseModel(device=self.device, weights_dir=self.weights_dir)
+        self.cvs_evaluator = CVSEvaluator(device=self.device)
         self.transform = A.Compose(
             [
                 A.SmallestMaxSize(max_size=256),
@@ -80,6 +82,7 @@ class PhaseInferenceService:
             "device": str(self.device),
             "weights_dir": str(self.weights_dir),
             "phase_count": len(PHASE_DEFINITIONS),
+            "cvs_model_ready": CVSEvaluator.is_ready(),
         }
 
     def analyze_video(self, video_path, sample_seconds=2.0, confidence_threshold=0.65, progress_callback=None):
@@ -144,7 +147,15 @@ class PhaseInferenceService:
             steps = [max(segments, key=lambda item: item["confidence"])]
         phase_distribution = self._build_distribution(segments, duration)
 
+        self._report_progress(progress_callback, "cvs", "CVS评估", "正在执行 CVS 安全视野评估。", 95)
+        cvs_result = self.cvs_evaluator.evaluate(
+            frames=[],
+            phase_predictions=predictions,
+            phase_segments=steps,
+        )
+
         return {
+            "cvs": self.cvs_evaluator.result_to_dict(cvs_result),
             "meta": {
                 "fps": round(fps, 2),
                 "frameCount": frame_count,

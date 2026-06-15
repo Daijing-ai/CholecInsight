@@ -235,13 +235,13 @@
                 <div class="overview-status-main">
                   <div class="overview-icon warning"><i class="fas fa-triangle-exclamation"></i></div>
                   <div>
-                    <p class="text-sm text-gray-500">异常检测</p>
-                    <p class="font-bold" :class="anomalyStatus.toneClass">
-                      {{ anomalyStatus.label }}
+                    <p class="text-sm text-gray-500">CVS评估</p>
+                     <p class="font-bold" :class="cvsAssessmentStatus.toneClass">
+                      {{ cvsAssessmentStatus.label }}
                     </p>
                   </div>
                 </div>
-                <p class="text-xs text-slate-400">将由独立异常模型提供</p>
+                <p class="text-xs text-slate-400">评估胆囊三角暴露、管道识别与肝床分离三项标准</p>
               </div>
             </div>
           </div>
@@ -389,7 +389,7 @@
                 <i class="fas" :class="aiReportStatus === 'loading' ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>
                 <span>{{ aiReportStatus === 'loading' ? '正在分析' : '查看AI分析' }}</span>
               </button>
-              <p>{{ aiReportStatus === 'loading' ? '正在结合关键步骤、器械统计和异常检测生成报告...' : 'AI 分析报告会基于当前视频分析结果生成。' }}</p>
+              <p>{{ aiReportStatus === 'loading' ? '正在结合关键步骤、器械统计和CVS评估生成报告...' : 'AI 分析报告会基于当前视频分析结果生成。' }}</p>
             </div>
 
             <template v-else>
@@ -494,6 +494,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { askDoubao } from '../api/chat'
 import { createPhaseAnalysisJob, getPhaseAnalysisJob } from '../api/phaseAnalysis'
+import { createToolDetectionJob, getToolDetectionJob } from '../api/toolDetection'
 import { applyPhaseAnalysisToProject, syncProjectPhaseAnalysis } from '../phaseAnalysisStore'
 import { getActiveProject, saveProject, setActiveProject } from '../projectStore'
 import { getProjectVideo, saveProjectVideo } from '../videoStore'
@@ -545,6 +546,9 @@ const instrumentStats = ref([])
 const instrumentChartExpanded = ref(false)
 let instrumentStatsTimer = null
 
+const toolDetectionState = ref(null)
+let toolPollingTimer = null
+
 const activeInsightTab = ref('report')
 const aiReportStatus = ref('idle')
 const qaInput = ref('')
@@ -553,19 +557,11 @@ const defaultQaMessages = [
   {
     id: 'assistant-welcome',
     role: 'assistant',
-    text: '我可以根据当前视频的关键步骤、器械统计和异常检测，模拟回答分析相关问题。',
+    text: '我可以根据当前视频的关键步骤、器械统计和CVS评估，模拟回答分析相关问题。',
   },
 ]
 const qaMessages = ref([...defaultQaMessages])
 let aiReportTimer = null
-
-const simulatedInstrumentStats = [
-  { key: 'grasper', label: '抓持钳', seconds: 92, color: '#2563eb' },
-  { key: 'hook', label: '电凝钩', seconds: 126, color: '#0ea5e9' },
-  { key: 'dissector', label: '分离钳', seconds: 74, color: '#10b981' },
-  { key: 'scissors', label: '剪刀', seconds: 38, color: '#f59e0b' },
-  { key: 'suction', label: '吸引器', seconds: 52, color: '#8b5cf6' },
-]
 
 const typeOptions = [
   { value: 'scalpel', label: '电凝钩' },
@@ -632,8 +628,24 @@ const phaseStatusLabel = computed(() => {
   return status || '待分析'
 })
 
-const anomalyStatus = computed(() => {
-  return { label: '待接入', toneClass: 'text-slate-500' }
+const cvsAssessmentStatus = computed(() => {
+  const cvs = phaseAnalysisResult.value?.cvs
+  if (!cvs) {
+    if (phaseAnalysisState.value?.status === 'running') {
+      return { label: '分析中', toneClass: 'text-blue-500' }
+    }
+    if (phaseAnalysisState.value?.status === 'completed') {
+      return { label: '待评估', toneClass: 'text-slate-500' }
+    }
+    return { label: '待分析', toneClass: 'text-slate-500' }
+  }
+  if (cvs.status === 'achieved') {
+    return { label: cvs.statusLabel, toneClass: 'text-green-600' }
+  }
+  if (cvs.status === 'partial') {
+    return { label: cvs.statusLabel, toneClass: 'text-amber-600' }
+  }
+  return { label: cvs.statusLabel, toneClass: 'text-red-500' }
 })
 
 const instrumentMaxSeconds = computed(() => {
@@ -654,15 +666,15 @@ const reportSummary = computed(() => {
     return '关键步骤分析正在进行中，报告会随后台进度持续更新。'
   }
   if (generatedSteps.value.length) {
-    return `已识别 ${generatedSteps.value.length} 个关键步骤，结合器械统计和异常检测结果形成当前报告。`
+    return `已识别 ${generatedSteps.value.length} 个关键步骤，结合器械统计和CVS评估结果形成当前报告。`
   }
-  return '视频已加载，可先执行关键步骤分析，报告内容会结合异常检测和器械统计自动汇总。'
+  return '视频已加载，可先执行关键步骤分析，报告内容会结合CVS评估和器械统计自动汇总。'
 })
 
 const reportMetrics = computed(() => [
   { label: '视频时长', value: formatTimeLabel(duration.value || 0) },
   { label: '关键步骤', value: `${generatedSteps.value.length} 个` },
-  { label: '异常检测', value: anomalyStatus.value.label },
+  { label: 'CVS评估', value: cvsAssessmentStatus.value.label },
   { label: '器械类型', value: instrumentStatsStatus.value === 'completed' ? `${instrumentStats.value.length} 类` : instrumentTypeCountLabel.value },
 ])
 
@@ -794,6 +806,19 @@ function revokeUploadedVideoUrl() {
 
 function restoreInstrumentStatsIfAvailable() {
   const savedStats = currentProject.value?.instrumentStats
+  const savedDetection = currentProject.value?.instrumentDetection
+
+  if (savedDetection) {
+    toolDetectionState.value = {
+      jobId: savedDetection.jobId,
+      status: savedDetection.status,
+      stage: savedDetection.stage || '',
+      stageLabel: savedDetection.stageLabel || '',
+      message: savedDetection.message || '',
+      progress: savedDetection.progress || 0,
+    }
+  }
+
   if (!savedStats || savedStats.fileName !== currentProject.value?.fileName || !Array.isArray(savedStats.items)) {
     return false
   }
@@ -816,6 +841,14 @@ function persistInstrumentStats() {
       items: instrumentStats.value,
       updatedAt: new Date().toISOString(),
     },
+    instrumentDetection: toolDetectionState.value ? {
+      jobId: toolDetectionState.value.jobId,
+      status: toolDetectionState.value.status,
+      stage: toolDetectionState.value.stage,
+      stageLabel: toolDetectionState.value.stageLabel,
+      message: toolDetectionState.value.message,
+      progress: toolDetectionState.value.progress,
+    } : currentProject.value.instrumentDetection,
     updatedAt: new Date().toISOString(),
     updatedAtLabel: new Date().toLocaleString('zh-CN'),
   }
@@ -824,37 +857,116 @@ function persistInstrumentStats() {
   setActiveProject(updatedProject)
 }
 
-function startInstrumentStatsSimulation(force = false) {
-  if (instrumentStatsStatus.value === 'loading') return
-  if (!uploadedVideoUrl.value && !projectVideoFile.value) return
-  if (!force && restoreInstrumentStatsIfAvailable()) return
+function stopToolPolling() {
+  if (toolPollingTimer) {
+    window.clearInterval(toolPollingTimer)
+    toolPollingTimer = null
+  }
+}
 
-  if (instrumentStatsTimer) {
-    window.clearTimeout(instrumentStatsTimer)
+function startToolPolling() {
+  stopToolPolling()
+  toolPollingTimer = window.setInterval(async () => {
+    await refreshToolJob()
+  }, 4000)
+}
+
+async function refreshToolJob() {
+  const jobId = toolDetectionState.value?.jobId
+  const status = toolDetectionState.value?.status
+  if (!jobId || !['queued', 'running'].includes(status)) {
+    stopToolPolling()
+    return
   }
 
+  try {
+    const job = await getToolDetectionJob(jobId)
+    toolDetectionState.value = {
+      jobId: job.jobId,
+      status: job.status,
+      stage: job.stage || '',
+      stageLabel: job.stageLabel || '',
+      message: job.message || '',
+      progress: job.progress || 0,
+    }
+    instrumentStatsMessage.value = job.message || ''
+
+    if (job.status === 'completed') {
+      stopToolPolling()
+      const statsResult = job.result?.instrumentStats
+      if (statsResult && statsResult.length) {
+        instrumentStats.value = statsResult
+        instrumentStatsStatus.value = 'completed'
+        instrumentStatsMessage.value = '器械使用频率统计完成'
+        persistInstrumentStats()
+        instrumentStatsTimer = window.setTimeout(() => {
+          instrumentChartExpanded.value = true
+          instrumentStatsTimer = null
+        }, 80)
+      }
+    } else if (job.status === 'failed') {
+      stopToolPolling()
+      instrumentStatsStatus.value = 'idle'
+      instrumentStatsMessage.value = ''
+      showStatus(job.error || '器械检测失败', 'error')
+    }
+  } catch (error) {
+    stopToolPolling()
+    instrumentStatsStatus.value = 'idle'
+    instrumentChartExpanded.value = false
+    showStatus(error?.message || '器械检测状态获取失败', 'error')
+  }
+}
+
+async function startInstrumentStatsDetection(force = false) {
+  if (instrumentStatsStatus.value === 'loading') return
+  if (!projectVideoFile.value) return
+  if (!force && restoreInstrumentStatsIfAvailable()) {
+    if (toolDetectionState.value && ['queued', 'running'].includes(toolDetectionState.value.status)) {
+      startToolPolling()
+    }
+    return
+  }
+
+  stopToolPolling()
   instrumentStatsStatus.value = 'loading'
   instrumentStatsMessage.value = '正在加载器械检测模型...'
   instrumentStats.value = []
   instrumentChartExpanded.value = false
 
-  instrumentStatsTimer = window.setTimeout(() => {
-    instrumentStatsMessage.value = '正在逐帧统计器械出现时长...'
-    instrumentStatsTimer = window.setTimeout(() => {
-      const maxSeconds = Math.max(...simulatedInstrumentStats.map((item) => item.seconds), 1)
-      instrumentStats.value = simulatedInstrumentStats.map((item) => ({
-        ...item,
-        ratio: Math.max(6, Math.round((item.seconds / maxSeconds) * 100)),
-      }))
-      instrumentStatsStatus.value = 'completed'
-      instrumentStatsMessage.value = '器械使用频率统计完成'
-      persistInstrumentStats()
-      instrumentStatsTimer = window.setTimeout(() => {
-        instrumentChartExpanded.value = true
-        instrumentStatsTimer = null
-      }, 80)
-    }, 1600)
-  }, 900)
+  try {
+    const job = await createToolDetectionJob(projectVideoFile.value, { sampleSeconds: 2 })
+    toolDetectionState.value = {
+      jobId: job.jobId,
+      status: job.status,
+      stage: job.stage || '',
+      stageLabel: job.stageLabel || '',
+      message: job.message || '',
+      progress: job.progress || 0,
+    }
+    instrumentStatsMessage.value = job.message || ''
+
+    if (currentProject.value) {
+      const updatedProject = {
+        ...currentProject.value,
+        instrumentDetection: {
+          jobId: job.jobId,
+          status: job.status,
+        },
+        updatedAt: new Date().toISOString(),
+        updatedAtLabel: new Date().toLocaleString('zh-CN'),
+      }
+      currentProject.value = updatedProject
+      saveProject(updatedProject)
+      setActiveProject(updatedProject)
+    }
+
+    startToolPolling()
+  } catch (error) {
+    instrumentStatsStatus.value = 'idle'
+    instrumentStatsMessage.value = ''
+    showStatus(error?.message || '器械检测请求失败,请检查后端服务是否启动。', 'error')
+  }
 }
 
 async function onVideoSelected(event) {
@@ -871,6 +983,8 @@ async function onVideoSelected(event) {
   qaMessages.value = [...defaultQaMessages]
   qaInput.value = ''
   qaLoading.value = false
+  stopToolPolling()
+  toolDetectionState.value = null
 
   if (currentProject.value) {
     await saveProjectVideo(currentProject.value.id, file)
@@ -882,6 +996,7 @@ async function onVideoSelected(event) {
       status: '待分析',
       phaseAnalysis: null,
       instrumentStats: null,
+      instrumentDetection: null,
       assistantState: {
         aiReportStatus: 'idle',
         qaMessages: [...defaultQaMessages],
@@ -893,7 +1008,7 @@ async function onVideoSelected(event) {
     currentProject.value = updatedProject
     saveProject(updatedProject)
     setActiveProject(updatedProject)
-    startInstrumentStatsSimulation(true)
+    startInstrumentStatsDetection(true)
     showStatus('视频已加载到当前项目，可继续分析', 'success')
   }
 }
@@ -1351,8 +1466,10 @@ function buildQaContext() {
         duration: formatTimeLabel(item.seconds),
       })),
     },
-    anomaly: {
-      status: anomalyStatus.value.label,
+    cvs: {
+      status: cvsAssessmentStatus.value.label,
+      score: phaseAnalysisResult.value?.cvs?.score ?? null,
+      criteria: phaseAnalysisResult.value?.cvs?.criteria || [],
     },
     notes: notes.value.map((note) => ({
       time: formatNoteRange(note),
@@ -1388,7 +1505,7 @@ function buildQaReply(question) {
     return `当前共有 ${notes.value.length} 条文字注释、${annotations.value.length} 条区域标注。`
   }
 
-  return `当前项目视频时长约 ${formatTimeLabel(duration.value || 0)}，已有 ${generatedSteps.value.length} 个关键步骤，异常检测状态为“${anomalyStatus.value.label}”。后续接入大模型后，这里会基于完整报告进行更深入问答。`
+  return `当前项目视频时长约 ${formatTimeLabel(duration.value || 0)}，已有 ${generatedSteps.value.length} 个关键步骤，CVS评估状态为“${cvsAssessmentStatus.value.label}”。后续接入大模型后，这里会基于完整报告进行更深入问答。`
 }
 
 function exportAnnotations() {
@@ -1459,7 +1576,7 @@ function buildReportLoadingHtml() {
         <div class="box">
           <div class="spinner"></div>
           <h1>正在生成 AI 分析报告</h1>
-          <p>正在汇总关键步骤、器械使用情况、异常检测和操作评估，稍后将进入 PDF 预览。</p>
+          <p>正在汇总关键步骤、器械使用情况、CVS评估和操作评估，稍后将进入 PDF 预览。</p>
         </div>
       </body>
     </html>
@@ -1774,14 +1891,14 @@ onMounted(() => {
 
   if (currentProject.value?.videoUrl) {
     uploadedVideoUrl.value = currentProject.value.videoUrl
-    startInstrumentStatsSimulation()
+    startInstrumentStatsDetection()
   } else if (currentProject.value?.hasVideo) {
     getProjectVideo(currentProject.value.id)
       .then((file) => {
         if (file) {
           projectVideoFile.value = file
           uploadedVideoUrl.value = URL.createObjectURL(file)
-          startInstrumentStatsSimulation()
+          startInstrumentStatsDetection()
         } else {
           showStatus('未找到该项目的视频文件，请重新上传', 'error')
         }
@@ -1807,6 +1924,21 @@ onMounted(() => {
       })
   }
 
+  const savedDetection = currentProject.value?.instrumentDetection
+  if (savedDetection?.jobId && ['queued', 'running'].includes(savedDetection.status)) {
+    toolDetectionState.value = {
+      jobId: savedDetection.jobId,
+      status: savedDetection.status,
+      stage: savedDetection.stage || '',
+      stageLabel: savedDetection.stageLabel || '',
+      message: savedDetection.message || '',
+      progress: savedDetection.progress || 0,
+    }
+    instrumentStatsStatus.value = 'loading'
+    instrumentStatsMessage.value = savedDetection.message || '正在恢复器械检测任务...'
+    startToolPolling()
+  }
+
   if (maskCanvas.value) maskCtx.value = maskCanvas.value.getContext('2d')
   window.addEventListener('resize', setCanvasSize)
   setCanvasSize()
@@ -1814,6 +1946,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopPhasePolling()
+  stopToolPolling()
   if (statusTimer) {
     window.clearTimeout(statusTimer)
     statusTimer = null
@@ -1821,6 +1954,10 @@ onBeforeUnmount(() => {
   if (instrumentStatsTimer) {
     window.clearTimeout(instrumentStatsTimer)
     instrumentStatsTimer = null
+  }
+  if (toolPollingTimer) {
+    window.clearInterval(toolPollingTimer)
+    toolPollingTimer = null
   }
   if (aiReportTimer) {
     window.clearTimeout(aiReportTimer)
