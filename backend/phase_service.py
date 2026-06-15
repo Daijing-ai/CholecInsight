@@ -148,10 +148,14 @@ class PhaseInferenceService:
         phase_distribution = self._build_distribution(segments, duration)
 
         self._report_progress(progress_callback, "cvs", "CVS评估", "正在执行 CVS 安全视野评估。", 95)
-        cvs_result = self.cvs_evaluator.evaluate(
-            frames=[],
-            phase_predictions=predictions,
-            phase_segments=steps,
+        cvs_result = self.cvs_evaluator.evaluate_from_video(
+            video_path=video_path,
+            sample_seconds=sample_seconds,
+            phase_result={
+                "predictions": predictions,
+                "steps": steps,
+            },
+            progress_callback=progress_callback,
         )
 
         return {

@@ -1,11 +1,14 @@
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import cv2
 import numpy as np
 import torch
+from torchvision import transforms
+
+from colenet_model import ColeNet
 
 
 CVS_CRITERIA = [
@@ -47,33 +50,77 @@ class CVSEvaluationResult:
 
 class CVSModel:
     """
-    CVS assessment model interface.
+    CVS assessment model using ColeNet (VGG16 backbone).
 
-    When the trained model is ready, it should implement:
-        predict(frames_tensor: torch.Tensor) -> List[Dict]
-
-    Each dict in the returned list should contain:
-        - triangle_clearance: float (0-1)
-        - two_structures: float (0-1)
-        - liver_bed_separation: float (0-1)
-        - cvs_score: int (0-3)
-        - cvs_achieved: bool
+    Accepts a list of BGR numpy frames (from cv2) and returns per-frame
+    predictions for the three CVS criteria.
     """
 
     def __init__(self, device=None, weights_path=None):
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.weights_path = Path(weights_path) if weights_path else None
+        backend_dir = Path(__file__).resolve().parent
+        default_weights = backend_dir / "pretrained_weights" / "cvs_best_model.pth"
+        self.weights_path = Path(weights_path) if weights_path else default_weights
+
+        data_normalization = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        self.transform = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            data_normalization,
+        ])
+
         self._model_ready = False
+        self._model = None
 
-    def load_weights(self, weights_path):
-        self.weights_path = Path(weights_path)
-        self._model_ready = self.weights_path.exists()
+        if self.weights_path.exists():
+            try:
+                self._model = ColeNet(backbone="vgg")
+                self._model.load_state_dict(torch.load(self.weights_path, map_location=self.device))
+                self._model.to(self.device)
+                self._model.eval()
+                self._model_ready = True
+            except Exception as e:
+                print(f"CVS model loading failed: {e}")
+                self._model_ready = False
 
-    def predict(self, frames_tensor: torch.Tensor) -> List[Dict[str, Any]]:
-        raise NotImplementedError(
-            "CVS model is not yet trained. "
-            "Implement predict() with signature: (frames_tensor) -> List[Dict]"
-        )
+    def predict(self, frames: Union[List[np.ndarray], torch.Tensor]) -> List[Dict[str, Any]]:
+        if not self._model_ready:
+            raise RuntimeError("CVS model is not loaded")
+
+        if isinstance(frames, list):
+            processed = []
+            for frame in frames:
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                processed.append(self.transform(frame_rgb))
+            batch = torch.stack(processed).to(self.device)
+        elif isinstance(frames, torch.Tensor):
+            batch = frames.to(self.device)
+        else:
+            raise TypeError(f"Unsupported frames type: {type(frames)}")
+
+        with torch.no_grad():
+            logits = self._model(batch.float())
+            probs = torch.sigmoid(logits)
+
+        predictions = []
+        for i in range(probs.shape[0]):
+            two_structures = float(probs[i, 0].item())
+            cystic_plate = float(probs[i, 1].item())
+            hc_triangle = float(probs[i, 2].item())
+
+            cvs_score = sum(1 for s in [hc_triangle, two_structures, cystic_plate] if s >= 0.5)
+
+            predictions.append({
+                "triangle_clearance": hc_triangle,
+                "two_structures": two_structures,
+                "liver_bed_separation": cystic_plate,
+                "cvs_score": cvs_score,
+                "cvs_achieved": cvs_score >= 3,
+            })
+
+        return predictions
 
     @property
     def model_ready(self):
@@ -90,12 +137,16 @@ class CVSEvaluator:
         frames: List[np.ndarray],
         phase_predictions: Optional[List[Dict[str, Any]]] = None,
         phase_segments: Optional[List[Dict[str, Any]]] = None,
+        sample_interval: Optional[int] = None,
+        fps: float = 25.0,
     ) -> CVSEvaluationResult:
         if not frames and not phase_predictions and not phase_segments:
             return self._empty_result()
 
         if self.model.model_ready and frames:
-            calot_frames = self._filter_calot_frames(frames, phase_predictions, phase_segments)
+            calot_frames = self._filter_calot_frames(
+                frames, phase_predictions, phase_segments, sample_interval, fps,
+            )
             if calot_frames:
                 return self._model_evaluate(calot_frames, phase_predictions, phase_segments)
 
@@ -132,34 +183,41 @@ class CVSEvaluator:
         if progress_callback:
             progress_callback("cvs", "CVS评估", "正在执行 CVS 安全视野评估。", 95)
 
-        return self.evaluate(frames, phase_predictions, phase_segments)
+        return self.evaluate(frames, phase_predictions, phase_segments, sample_interval, fps)
 
-    def _filter_calot_frames(self, frames, phase_predictions, phase_segments):
+    def _filter_calot_frames(self, frames, phase_predictions, phase_segments, sample_interval=None, fps=25.0):
         calot_phase_id = 1
         if not phase_predictions and not phase_segments:
             return frames
 
-        frame_indices = set()
+        calot_video_frame_indices = set()
         if phase_predictions:
             for pred in phase_predictions:
                 if pred.get("phaseId") == calot_phase_id:
-                    frame_indices.add(pred.get("frameIndex", 0))
+                    calot_video_frame_indices.add(pred.get("frameIndex", 0))
 
         if phase_segments:
             for seg in phase_segments:
                 if seg.get("phaseId") == calot_phase_id:
-                    frame_indices.add(int(seg.get("startSeconds", 0)))
+                    start_sec = seg.get("startSeconds", 0)
+                    calot_video_frame_indices.add(int(start_sec * fps))
 
-        if not frame_indices:
+        if not calot_video_frame_indices:
             return frames
 
-        match_count = len(frame_indices)
-        filtered = [f for i, f in enumerate(frames) if i < match_count]
+        if sample_interval is None or sample_interval <= 0:
+            return frames
+
+        filtered = []
+        for i, frame in enumerate(frames):
+            video_frame_idx = i * sample_interval
+            if video_frame_idx in calot_video_frame_indices:
+                filtered.append(frame)
+
         return filtered if filtered else frames
 
     def _model_evaluate(self, frames, phase_predictions, phase_segments):
-        tensor = self._frames_to_tensor(frames)
-        predictions = self.model.predict(tensor)
+        predictions = self.model.predict(frames)
 
         avg_scores = {
             "triangle_clearance": float(np.mean([p["triangle_clearance"] for p in predictions])),
@@ -270,4 +328,6 @@ class CVSEvaluator:
 
     @staticmethod
     def is_ready():
-        return False
+        backend_dir = Path(__file__).resolve().parent
+        weights_path = backend_dir / "pretrained_weights" / "cvs_best_model.pth"
+        return weights_path.exists()
