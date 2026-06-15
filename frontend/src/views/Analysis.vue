@@ -154,48 +154,66 @@
 
           <div class="analysis-side-panel">
           <div class="middle-video-aligned-panel">
-          <div class="side-card bg-gray-50 p-4 rounded-lg shadow-sm">
-            <h3 class="font-semibold text-lg mb-3 flex items-center">
+          <div class="side-card bg-gray-50 p-4 rounded-lg shadow-sm flex flex-col">
+            <h3 class="font-semibold text-lg mb-3 flex items-center shrink-0">
               <i class="fas fa-circle-info mr-2 text-blue-500"></i>基本信息
             </h3>
-            <div class="space-y-3">
-              <div class="bg-white p-4 rounded-md shadow-sm space-y-3">
-                <div class="flex justify-between items-center text-sm">
-                  <span class="text-gray-500">项目名称</span>
-                  <span class="font-semibold text-slate-800">{{ currentProject?.title || '未命名项目' }}</span>
+            <div class="info-grid">
+              <div class="overview-card">
+                <div class="overview-icon"><i class="fas fa-folder"></i></div>
+                <div class="overview-card-body">
+                  <p class="text-sm text-gray-500">项目名称</p>
+                  <p class="font-bold truncate">{{ currentProject?.title || '未命名项目' }}</p>
                 </div>
-                <div class="flex justify-between items-center text-sm">
-                  <span class="text-gray-500">术式名称</span>
-                  <span class="font-semibold text-slate-800">{{ currentProject?.procedure || '未填写' }}</span>
+              </div>
+              <div class="overview-card">
+                <div class="overview-icon"><i class="fas fa-stethoscope"></i></div>
+                <div class="overview-card-body">
+                  <p class="text-sm text-gray-500">术式</p>
+                  <p class="font-bold truncate">{{ currentProject?.procedure || '未填写' }}</p>
                 </div>
-                <div class="flex justify-between items-center text-sm">
-                  <span class="text-gray-500">术者</span>
-                  <span class="font-semibold text-slate-800">{{ currentProject?.surgeon || '未填写' }}</span>
+              </div>
+              <div class="overview-card">
+                <div class="overview-icon"><i class="fas fa-user-doctor"></i></div>
+                <div class="overview-card-body">
+                  <p class="text-sm text-gray-500">术者</p>
+                  <p class="font-bold truncate">{{ currentProject?.surgeon || '未填写' }}</p>
                 </div>
-                <div class="flex justify-between items-center text-sm">
-                  <span class="text-gray-500">日期</span>
-                  <span class="font-semibold text-slate-800">{{ currentProject?.date || '未填写' }}</span>
+              </div>
+              <div class="overview-card">
+                <div class="overview-icon"><i class="fas fa-calendar-days"></i></div>
+                <div class="overview-card-body">
+                  <p class="text-sm text-gray-500">日期</p>
+                  <p class="font-bold truncate">{{ currentProject?.date || '未填写' }}</p>
                 </div>
-                <div class="flex justify-between items-center text-sm">
-                  <span class="text-gray-500">视频总时长</span>
-                  <span class="font-semibold text-slate-800">{{ formatTimeLabel(duration || 165) }}</span>
+              </div>
+              <div class="overview-card">
+                <div class="overview-icon"><i class="fas fa-hourglass-half"></i></div>
+                <div class="overview-card-body">
+                  <p class="text-sm text-gray-500">视频时长</p>
+                  <p class="font-bold">{{ formatTimeLabel(duration || 165) }}</p>
                 </div>
-                <div class="flex justify-between items-center text-sm">
-                  <span class="text-gray-500">状态</span>
+              </div>
+              <div class="overview-card">
+                <div class="overview-icon"><i class="fas fa-flag"></i></div>
+                <div class="overview-card-body">
+                  <p class="text-sm text-gray-500">状态</p>
                   <span
-                    class="text-xs rounded-full px-3 py-1"
+                    class="text-xs rounded-full px-3 py-1 font-bold"
                     :class="statusClass(currentProject?.status)"
                   >
                     {{ currentProject?.status || '待分析' }}
                   </span>
                 </div>
-                <div class="flex justify-between items-center text-sm">
-                  <span class="text-gray-500">视频文件</span>
-                  <span class="font-semibold text-slate-800 break-all text-right max-w-[65%]">{{ currentProject?.fileName || '未上传' }}</span>
+              </div>
+              <div class="overview-card overview-card-wide">
+                <div class="overview-icon"><i class="fas fa-film"></i></div>
+                <div class="overview-card-body">
+                  <p class="text-sm text-gray-500">视频文件</p>
+                  <p class="font-bold truncate">{{ currentProject?.fileName || '未上传' }}</p>
                 </div>
               </div>
             </div>
-
           </div>
 
           <div class="side-card overview-side-card bg-gray-50 p-4 rounded-lg">
@@ -231,17 +249,27 @@
                   <p class="font-bold">{{ instrumentTypeCountLabel }}</p>
                 </div>
               </div>
-              <div class="overview-status-card overview-card-wide">
-                <div class="overview-status-main">
+              <div class="cvs-detail-card overview-card-wide">
+                <div class="cvs-detail-header">
                   <div class="overview-icon warning"><i class="fas fa-triangle-exclamation"></i></div>
-                  <div>
-                    <p class="text-sm text-gray-500">CVS评估</p>
-                     <p class="font-bold" :class="cvsAssessmentStatus.toneClass">
-                      {{ cvsAssessmentStatus.label }}
-                    </p>
+                  <span class="cvs-detail-title">CVS安全评估</span>
+                  <span class="cvs-grade-badge" :class="cvsGradeClass">{{ cvsAssessmentStatus.label }}</span>
+                </div>
+
+                <div v-if="hasCvsResult" class="cvs-criteria-list">
+                  <div v-for="item in cvsCriteriaList" :key="item.key" class="cvs-criteria-row">
+                    <i class="fas cvs-criteria-icon"
+                       :class="item.met ? 'fa-circle-check text-green-500' : 'fa-circle-xmark text-red-400'">
+                    </i>
+                    <span class="cvs-criteria-label">{{ item.label }}</span>
+                    <div class="cvs-criteria-bar-shell">
+                      <div class="cvs-criteria-bar" :style="{ width: `${(item.score * 100).toFixed(0)}%` }"></div>
+                    </div>
+                    <span class="cvs-criteria-percent">{{ (item.score * 100).toFixed(0) }}%</span>
                   </div>
                 </div>
-                <p class="text-xs text-slate-400">评估胆囊三角暴露、管道识别与肝床分离三项标准</p>
+
+                <p v-if="!hasCvsResult" class="text-xs text-slate-400">评估胆囊三角暴露、管道识别与肝床分离三项标准</p>
               </div>
             </div>
           </div>
@@ -646,6 +674,22 @@ const cvsAssessmentStatus = computed(() => {
     return { label: cvs.statusLabel, toneClass: 'text-amber-600' }
   }
   return { label: cvs.statusLabel, toneClass: 'text-red-500' }
+})
+
+const cvsCriteriaList = computed(() => {
+  return phaseAnalysisResult.value?.cvs?.criteria || []
+})
+
+const hasCvsResult = computed(() => {
+  return !!phaseAnalysisResult.value?.cvs
+})
+
+const cvsGradeClass = computed(() => {
+  const cvs = phaseAnalysisResult.value?.cvs
+  if (!cvs) return 'cvs-grade-pending'
+  if (cvs.status === 'achieved') return 'cvs-grade-achieved'
+  if (cvs.status === 'partial') return 'cvs-grade-partial'
+  return 'cvs-grade-not-achieved'
 })
 
 const instrumentMaxSeconds = computed(() => {
@@ -2014,7 +2058,7 @@ const analysisImageSrc =
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(500px, 0.95fr) minmax(420px, 0.72fr) minmax(360px, 0.58fr);
+  grid-template-columns: minmax(480px, 0.95fr) minmax(440px, 0.82fr) minmax(340px, 0.48fr);
   gap: 16px;
   align-items: stretch;
 }
@@ -2038,7 +2082,7 @@ const analysisImageSrc =
   overflow: hidden;
 }
 .middle-video-aligned-panel {
-  flex: 0 0 clamp(300px, 23vw, 43vh);
+  flex: 0 0 clamp(300px, 25vw, 43vh);
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2148,6 +2192,103 @@ const analysisImageSrc =
   margin: 0;
   white-space: nowrap;
 }
+
+.cvs-detail-card {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+.cvs-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cvs-detail-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #334155;
+  flex: 1;
+}
+.cvs-grade-badge {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 3px 12px;
+  border-radius: 20px;
+}
+.cvs-grade-achieved {
+  background: #dcfce7;
+  color: #16a34a;
+}
+.cvs-grade-partial {
+  background: #fef3c7;
+  color: #d97706;
+}
+.cvs-grade-not-achieved {
+  background: #fee2e2;
+  color: #dc2626;
+}
+.cvs-grade-pending {
+  background: #f1f5f9;
+  color: #64748b;
+}
+.cvs-criteria-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cvs-criteria-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cvs-criteria-icon {
+  font-size: 14px;
+  flex: 0 0 auto;
+}
+.cvs-criteria-label {
+  font-size: 13px;
+  color: #475569;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.cvs-criteria-bar-shell {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: #f1f5f9;
+  overflow: hidden;
+}
+.cvs-criteria-bar {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #3b82f6, #2563eb);
+  transition: width 0.35s ease;
+}
+.cvs-criteria-percent {
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+  flex: 0 0 auto;
+  min-width: 36px;
+  text-align: right;
+}
+
+.info-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(4, 1fr);
+  gap: 10px;
+}
+
 .analysis-side-panel::-webkit-scrollbar {
   width: 8px;
 }
@@ -2828,7 +2969,7 @@ const analysisImageSrc =
 }
 @media (max-width: 1599px) {
   .analysis-main-grid {
-    grid-template-columns: minmax(440px, 0.92fr) minmax(360px, 0.7fr) minmax(340px, 0.58fr);
+    grid-template-columns: minmax(420px, 0.92fr) minmax(380px, 0.82fr) minmax(320px, 0.51fr);
   }
   .analysis-assistant-panel {
     height: 100%;
