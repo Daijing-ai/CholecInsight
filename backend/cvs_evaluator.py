@@ -1,4 +1,3 @@
-import random
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -33,6 +32,7 @@ CVS_STATUS_LEVELS = {
     "achieved": {"label": "已达成", "description": "三条 CVS 标准全部满足，可安全进行夹闭与离断。", "min_score": 3},
     "partial": {"label": "部分达成", "description": "满足 1-2 条 CVS 标准，建议进一步解剖确认后再夹闭。", "min_score": 1},
     "not_achieved": {"label": "未达成", "description": "CVS 标准均未满足，夹闭存在误伤风险，需继续解剖暴露。", "min_score": 0},
+    "not_applicable": {"label": "CVS不适用", "description": "当前视频中未检测到胆囊三角解剖阶段，CVS评估不适用。", "min_score": -1},
 }
 
 
@@ -143,14 +143,16 @@ class CVSEvaluator:
         if not frames and not phase_predictions and not phase_segments:
             return self._empty_result()
 
-        if self.model.model_ready and frames:
-            calot_frames = self._filter_calot_frames(
-                frames, phase_predictions, phase_segments, sample_interval, fps,
-            )
-            if calot_frames:
-                return self._model_evaluate(calot_frames, phase_predictions, phase_segments)
+        if not self.model.model_ready:
+            return self._build_unavailable_result("CVS 模型权重未加载，无法执行真实评估。")
 
-        return self._placeholder_evaluate(phase_predictions, phase_segments)
+        calot_frames = self._filter_calot_frames(
+            frames, phase_predictions, phase_segments, sample_interval, fps,
+        )
+        if calot_frames:
+            return self._model_evaluate(calot_frames, phase_predictions, phase_segments)
+
+        return self._build_not_applicable_result()
 
     def evaluate_from_video(
         self,
@@ -203,7 +205,7 @@ class CVSEvaluator:
                     calot_video_frame_indices.add(int(start_sec * fps))
 
         if not calot_video_frame_indices:
-            return frames
+            return []
 
         if sample_interval is None or sample_interval <= 0:
             return frames
@@ -214,7 +216,7 @@ class CVSEvaluator:
             if video_frame_idx in calot_video_frame_indices:
                 filtered.append(frame)
 
-        return filtered if filtered else frames
+        return filtered
 
     def _model_evaluate(self, frames, phase_predictions, phase_segments):
         predictions = self.model.predict(frames)
@@ -227,25 +229,46 @@ class CVSEvaluator:
 
         return self._build_result(avg_scores, model_used=True)
 
-    def _placeholder_evaluate(self, phase_predictions=None, phase_segments=None):
-        has_calot = self._has_calot_phase(phase_predictions, phase_segments)
+    def _build_unavailable_result(self, description: str = ""):
+        empty_criteria = []
+        for criterion in CVS_CRITERIA:
+            empty_criteria.append({
+                "key": criterion["key"],
+                "label": criterion["label"],
+                "description": criterion["description"],
+                "score": None,
+                "met": False,
+            })
 
-        if has_calot:
-            triangle = round(random.uniform(0.55, 0.85), 3)
-            two_struct = round(random.uniform(0.50, 0.80), 3)
-            liver_bed = round(random.uniform(0.45, 0.75), 3)
-        else:
-            triangle = round(random.uniform(0.15, 0.40), 3)
-            two_struct = round(random.uniform(0.10, 0.35), 3)
-            liver_bed = round(random.uniform(0.10, 0.35), 3)
+        return CVSEvaluationResult(
+            score=-1,
+            status="unavailable",
+            status_label="模型不可用",
+            status_description=description or "CVS 评估模型未就绪，无法提供评估结果。",
+            criteria_results=empty_criteria,
+            model_used=False,
+        )
 
-        avg_scores = {
-            "triangle_clearance": triangle,
-            "two_structures": two_struct,
-            "liver_bed_separation": liver_bed,
-        }
+    def _build_not_applicable_result(self):
+        status_info = CVS_STATUS_LEVELS["not_applicable"]
+        empty_criteria = []
+        for criterion in CVS_CRITERIA:
+            empty_criteria.append({
+                "key": criterion["key"],
+                "label": criterion["label"],
+                "description": criterion["description"],
+                "score": None,
+                "met": False,
+            })
 
-        return self._build_result(avg_scores, model_used=False)
+        return CVSEvaluationResult(
+            score=-1,
+            status="not_applicable",
+            status_label=status_info["label"],
+            status_description=status_info["description"],
+            criteria_results=empty_criteria,
+            model_used=False,
+        )
 
     def _build_result(self, avg_scores, model_used=False):
         criteria_results = []
@@ -315,13 +338,24 @@ class CVSEvaluator:
         )
 
     def result_to_dict(self, result: CVSEvaluationResult) -> Dict[str, Any]:
+        criteria = []
+        for c in result.criteria_results:
+            criteria.append({
+                "key": c["key"],
+                "label": c["label"],
+                "description": c["description"],
+                "score": c["score"],
+                "met": bool(c["score"] and c["score"] >= 0.5),
+            })
+
         return {
             "score": result.score,
             "status": result.status,
             "statusLabel": result.status_label,
             "statusDescription": result.status_description,
-            "criteria": result.criteria_results,
+            "criteria": criteria,
             "modelUsed": result.model_used,
+            "modelAvailable": result.model_used,
             "focusPhaseId": result.focus_phase_id,
             "focusPhaseLabel": result.focus_phase_label,
         }

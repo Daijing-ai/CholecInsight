@@ -256,20 +256,23 @@
                   <span class="cvs-grade-badge" :class="cvsGradeClass">{{ cvsAssessmentStatus.label }}</span>
                 </div>
 
-                <div v-if="hasCvsResult" class="cvs-criteria-list">
+                <div v-if="hasCvsResult && phaseAnalysisResult.cvs.modelAvailable" class="cvs-criteria-list">
                   <div v-for="item in cvsCriteriaList" :key="item.key" class="cvs-criteria-row">
                     <i class="fas cvs-criteria-icon"
                        :class="item.met ? 'fa-circle-check text-green-500' : 'fa-circle-xmark text-red-400'">
                     </i>
                     <span class="cvs-criteria-label">{{ item.label }}</span>
                     <div class="cvs-criteria-bar-shell">
-                      <div class="cvs-criteria-bar" :style="{ width: `${(item.score * 100).toFixed(0)}%` }"></div>
+                      <div class="cvs-criteria-bar" :style="{ width: `${((item.score ?? 0) * 100).toFixed(0)}%` }"></div>
                     </div>
-                    <span class="cvs-criteria-percent">{{ (item.score * 100).toFixed(0) }}%</span>
+                    <span class="cvs-criteria-percent">{{ item.score != null ? `${(item.score * 100).toFixed(0)}%` : '--' }}</span>
                   </div>
                 </div>
 
-                <p v-if="!hasCvsResult" class="text-xs text-slate-400">评估胆囊三角暴露、管道识别与肝床分离三项标准</p>
+                <p v-else-if="hasCvsResult" class="text-xs text-slate-400">
+                  {{ phaseAnalysisResult.cvs.statusDescription || 'CVS 评估不可用' }}
+                </p>
+                <p v-else class="text-xs text-slate-400">评估胆囊三角暴露、管道识别与肝床分离三项标准</p>
               </div>
             </div>
           </div>
@@ -305,7 +308,7 @@
                     <div
                       class="instrument-bar"
                       :style="{
-                        height: `${instrumentChartExpanded ? item.ratio : 0}%`,
+                        height: `${instrumentChartExpanded && instrumentMaxSeconds > 0 ? (item.seconds / instrumentMaxSeconds * 100) : 0}%`,
                         background: item.color,
                       }"
                     ></div>
@@ -667,6 +670,12 @@ const cvsAssessmentStatus = computed(() => {
     }
     return { label: '待分析', toneClass: 'text-slate-500' }
   }
+  if (cvs.status === 'not_applicable') {
+    return { label: cvs.statusLabel || 'CVS不适用', toneClass: 'text-slate-400' }
+  }
+  if (cvs.status === 'unavailable') {
+    return { label: cvs.statusLabel || '模型不可用', toneClass: 'text-slate-500' }
+  }
   if (cvs.status === 'achieved') {
     return { label: cvs.statusLabel, toneClass: 'text-green-600' }
   }
@@ -687,6 +696,8 @@ const hasCvsResult = computed(() => {
 const cvsGradeClass = computed(() => {
   const cvs = phaseAnalysisResult.value?.cvs
   if (!cvs) return 'cvs-grade-pending'
+  if (cvs.status === 'not_applicable') return 'cvs-grade-pending'
+  if (cvs.status === 'unavailable') return 'cvs-grade-pending'
   if (cvs.status === 'achieved') return 'cvs-grade-achieved'
   if (cvs.status === 'partial') return 'cvs-grade-partial'
   return 'cvs-grade-not-achieved'
@@ -699,7 +710,8 @@ const instrumentMaxSeconds = computed(() => {
 const instrumentTypeCountLabel = computed(() => {
   if (instrumentStatsStatus.value === 'loading') return '统计中'
   if (instrumentStatsStatus.value !== 'completed') return '待统计'
-  return `${instrumentStats.value.length}`
+  const activeCount = instrumentStats.value.filter((item) => item.seconds > 0).length
+  return `${activeCount}`
 })
 
 const reportSummary = computed(() => {
@@ -719,7 +731,7 @@ const reportMetrics = computed(() => [
   { label: '视频时长', value: formatTimeLabel(duration.value || 0) },
   { label: '关键步骤', value: `${generatedSteps.value.length} 个` },
   { label: 'CVS评估', value: cvsAssessmentStatus.value.label },
-  { label: '器械类型', value: instrumentStatsStatus.value === 'completed' ? `${instrumentStats.value.length} 类` : instrumentTypeCountLabel.value },
+  { label: '器械类型', value: `${instrumentTypeCountLabel.value} 类` },
 ])
 
 const operationAssessment = computed(() => {
@@ -2538,7 +2550,7 @@ const analysisImageSrc =
 .instrument-plot {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   align-items: end;
   gap: 12px;
   padding: 8px 0 0;

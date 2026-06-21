@@ -59,7 +59,7 @@ class ToolDetectionService:
             for tool_id in TOOL_DEFINITIONS:
                 conf = float(probs_array[tool_id])
                 if conf >= confidence_threshold:
-                    per_tool_seconds[tool_id] += sample_seconds
+                    per_tool_seconds[tool_id] += sample_interval / fps
                 predictions.append({
                     "frameIndex": frame_index,
                     "seconds": round(frame_index / fps, 2),
@@ -87,14 +87,14 @@ class ToolDetectionService:
         instrument_stats = []
         for tool_id in sorted(TOOL_DEFINITIONS.keys()):
             tool_def = TOOL_DEFINITIONS[tool_id]
-            seconds = round(per_tool_seconds[tool_id], 2)
+            seconds = round(min(per_tool_seconds[tool_id], duration), 2)
             instrument_stats.append({
                 "toolId": tool_id,
                 "key": tool_def["key"],
                 "label": tool_def["label"],
                 "color": tool_def["color"],
                 "seconds": seconds,
-                "ratio": round(seconds / duration, 4) if duration else 0,
+                "ratio": round(min(seconds / duration, 1.0), 4) if duration else 0,
                 "chartRatio": max(6, round((seconds / max_seconds) * 100)) if max_seconds > 0 else 0,
             })
 
